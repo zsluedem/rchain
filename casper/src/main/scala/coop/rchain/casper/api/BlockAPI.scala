@@ -64,7 +64,7 @@ object BlockAPI {
     ))
   }
 
-  def createBlock[F[_]: Sync: Concurrent: EngineCell: Log: Metrics: Span](
+  def createBlock[F[_]: Sync: Concurrent: EngineCell: Log: Metrics: Span: SynchronyConstraintChecker: LastFinalizedHeightConstraintChecker](
       blockApiLock: Semaphore[F],
       printUnmatchedSends: Boolean = false
   ): F[ApiErr[String]] = {
@@ -73,39 +73,64 @@ object BlockAPI {
       _.withCasper[ApiErr[String]](
         casper => {
           Sync[F].bracket(blockApiLock.tryAcquire) {
-            case true =>
+            case true => {
               implicit val ms = BlockAPIMetricsSource
-              (for {
-                _ <- Metrics[F].incrementCounter("propose")
-                // TODO: Get rid off CreateBlockStatus and use EitherT
-                maybeBlock <- casper.createBlock
-                result <- maybeBlock match {
-                           case err: NoBlock =>
-                             s"Error while creating block: $err"
-                               .asLeft[String]
-                               .pure[F]
-                           case Created(block) =>
-                             Log[F].info(s"Proposing ${PrettyPrinter.buildString(block)}") *>
-                               casper
-                                 .addBlock(block) >>= (addResponse(
-                               _,
-                               block,
-                               casper,
-                               printUnmatchedSends
-                             ))
-                         }
-              } yield result)
-                .timer("propose-total-time")
-                .attempt
-                .map(_.leftMap(e => s"Error while creating block: ${e.getMessage}").joinRight)
-                .flatMap {
-                  case Left(error) =>
-                    Metrics[F].incrementCounter("propose-failed") >>
-                      Log[F].warn(error) >>
-                      error.asLeft[String].pure[F]
-                  case result =>
-                    result.pure[F]
-                }
+              val failed = Log[F]
+                .warn(s"Error: Cannot meet constraints, cancelling block creation") >>
+                s"Cannot meet constraints, cancelling block creation"
+                  .asLeft[String]
+                  .pure[F]
+              for {
+                genesis        <- casper.getGenesis
+                validator      <- casper.getValidator
+                dag            <- casper.blockDag
+                runtimeManager <- casper.getRuntimeManager
+                checkSynchronyConstraint = SynchronyConstraintChecker[F]
+                  .check(
+                    dag,
+                    runtimeManager,
+                    genesis,
+                    validator
+                  )
+                checkLastFinalizedHeightConstraint = LastFinalizedHeightConstraintChecker[F]
+                  .check(dag, genesis, validator)
+                createBlock = (for {
+                  _          <- Metrics[F].incrementCounter("propose")
+                  maybeBlock <- casper.createBlock
+                  result <- maybeBlock match {
+                             case err: NoBlock =>
+                               s"Error while creating block: $err"
+                                 .asLeft[String]
+                                 .pure[F]
+                             case Created(block) =>
+                               Log[F]
+                                 .info(s"Proposing ${PrettyPrinter.buildString(block)}") *>
+                                 casper
+                                   .addBlock(block) >>= (addResponse(
+                                 _,
+                                 block,
+                                 casper,
+                                 printUnmatchedSends
+                               ))
+                           }
+                } yield result)
+                  .timer("propose-total-time")
+                  .attempt
+                  .map(
+                    _.leftMap(e => s"Error while creating block: ${e.getMessage}").joinRight
+                  )
+                  .flatMap {
+                    case Left(error) =>
+                      Metrics[F].incrementCounter("propose-failed") >>
+                        Log[F].warn(error) >>
+                        error.asLeft[String].pure[F]
+                    case result =>
+                      result.pure[F]
+                  }
+                result <- checkSynchronyConstraint
+                           .ifM(checkLastFinalizedHeightConstraint.ifM(createBlock, failed), failed)
+              } yield result
+            }
             case false =>
               "Error: There is another propose in progress.".asLeft[String].pure[F]
           } {
