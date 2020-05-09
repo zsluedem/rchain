@@ -71,6 +71,7 @@ class MultiParentCasperImpl[F[_]: Sync: Concurrent: Log: Time: SafetyOracle: Las
     Metrics.Source(CasperMetricsSource, "create-block")
 
   def getGenesis: F[BlockMessage] = genesis.pure[F]
+  val lockCounter                 = Ref.unsafe(0)
 
   def getValidator: F[Option[PublicKey]] = validatorId.map(_.publicKey).pure[F]
 
@@ -101,6 +102,9 @@ class MultiParentCasperImpl[F[_]: Sync: Concurrent: Log: Time: SafetyOracle: Las
       _ <- Log[F].info(
             s"Block ${PrettyPrinter.buildString(b.blockHash)} asks for blockProcessingLock."
           )
+      counter <- lockCounter.modify(c => (c + 1, c + 1))
+      _ <- Log[F].info(s"Casper lock counter ${counter} #${b.body.state.blockNumber} ${PrettyPrinter
+            .buildString(b.blockHash)}")
       // ATM Casper is allowed to add only one block at a time
       status <- blockProcessingLock.withPermit {
                  val exists = for {
@@ -113,7 +117,7 @@ class MultiParentCasperImpl[F[_]: Sync: Concurrent: Log: Time: SafetyOracle: Las
                    dagContains <- dag.contains(b.blockHash)
                  } yield dagContains || cst.blockBuffer.contains(b.blockHash)
 
-                 exists.ifM(logAlreadyProcessed, add)
+                 exists.ifM(logAlreadyProcessed, add) <* lockCounter.update(_ - 1)
                }
       _ <- status.traverse_ { _ =>
             metricsF.setGauge("block-height", blockNumber(b))(AddBlockMetricsSource) >>
@@ -425,10 +429,12 @@ class MultiParentCasperImpl[F[_]: Sync: Concurrent: Log: Time: SafetyOracle: Las
     import cats.instances.list._
     type Attempt = (BlockMessage, (ValidBlockProcessing, BlockDagRepresentation[F]))
     for {
-      _                    <- Span[F].mark("reattempt-buffer")
-      state                <- Cell[F, CasperState].read
-      dependencyFree       = state.dependencyDag.dependencyFree
-      dependencyFreeBlocks = state.blockBuffer.intersect(dependencyFree).toList
+      _                        <- Span[F].mark("reattempt-buffer")
+      state                    <- Cell[F, CasperState].read
+      dependencyFree           = state.dependencyDag.dependencyFree
+      dependencyFreeBlocks     = state.blockBuffer.intersect(dependencyFree).toList
+      (freeCount, bufferCount) = (dependencyFreeBlocks.size, state.blockBuffer.size)
+      _                        <- Log[F].info(s"Casper re-attempt free: $freeCount, buffer: $bufferCount")
       attemptsWithDag <- dependencyFreeBlocks.foldM((List.empty[Attempt], dag)) {
                           case ((attempts, updatedDag), blockHash) =>
                             for {
