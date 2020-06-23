@@ -26,10 +26,8 @@ import monix.execution.Scheduler
 import monix.reactive.Observable
 import coop.rchain.casper.{ReportingCasper, _}
 object DeployGrpcServiceV1 {
-  def instance[F[_]: Concurrent: Log: SafetyOracle: BlockStore: Taskable: Span: EngineCell](
-      blockApiLock: Semaphore[F],
-      apiMaxBlocksLimit: Int,
-      reportingCasper: ReportingCasper[F]
+  def instance[F[_]: Concurrent: Log: Taskable: Span: SafetyOracle: BlockStore](
+      blockAPI: BlockAPI[F]
   )(
       implicit worker: Scheduler
   ): DeployServiceV1GrpcMonix.DeployService =
@@ -79,7 +77,7 @@ object DeployGrpcServiceV1 {
               })
             },
             dd => {
-              defer(BlockAPI.deploy[F](dd)) { r =>
+              defer(blockAPI.deploy(dd)) { r =>
                 import DeployResponse.Message
                 import DeployResponse.Message._
                 DeployResponse(r.fold[Message](Error, Result))
@@ -88,7 +86,7 @@ object DeployGrpcServiceV1 {
           )
 
       def getBlock(request: BlockQuery): Task[BlockResponse] =
-        defer(BlockAPI.getBlock[F](request.hash)) { r =>
+        defer(blockAPI.getBlock(request.hash)) { r =>
           import BlockResponse.Message
           import BlockResponse.Message._
           BlockResponse(r.fold[Message](Error, BlockInfo))
@@ -99,17 +97,16 @@ object DeployGrpcServiceV1 {
         implicit val ser: GraphSerializer[Effect]             = new ListSerializer[Effect]
         val serialize: Effect[Graphz[Effect]] => List[String] = _.runS(Vector.empty).value.toList
 
-        val depth            = if (request.depth <= 0) apiMaxBlocksLimit else request.depth
+        val depth            = request.depth
         val config           = GraphConfig(request.showJustificationLines)
         val startBlockNumber = request.startBlockNumber
 
         Observable
           .fromTask(
             deferList(
-              BlockAPI
-                .visualizeDag[F, Effect, List[String]](
+              blockAPI
+                .visualizeDag[Effect, List[String]](
                   depth,
-                  apiMaxBlocksLimit,
                   startBlockNumber,
                   (ts, lfb) => GraphzGenerator.dagAsCluster[F, Effect](ts, lfb, config),
                   serialize
@@ -125,7 +122,7 @@ object DeployGrpcServiceV1 {
       }
 
       def machineVerifiableDag(request: MachineVerifyQuery): Task[MachineVerifyResponse] =
-        defer(BlockAPI.machineVerifiableDag[F](apiMaxBlocksLimit, apiMaxBlocksLimit)) { r =>
+        defer(blockAPI.machineVerifiableDag(100)) { r =>
           import MachineVerifyResponse.Message
           import MachineVerifyResponse.Message._
           MachineVerifyResponse(r.fold[Message](Error, Content))
@@ -134,7 +131,7 @@ object DeployGrpcServiceV1 {
       def showMainChain(request: BlocksQuery): Observable[BlockInfoResponse] =
         Observable
           .fromTask(
-            deferList(BlockAPI.showMainChain[F](request.depth, apiMaxBlocksLimit)) { r =>
+            deferList(blockAPI.showMainChain(request.depth)) { r =>
               import BlockInfoResponse.Message
               import BlockInfoResponse.Message._
               BlockInfoResponse(r.fold[Message](Error, BlockInfo))
@@ -146,8 +143,8 @@ object DeployGrpcServiceV1 {
         Observable
           .fromTask(
             deferList(
-              BlockAPI
-                .getBlocks[F](request.depth, apiMaxBlocksLimit)
+              blockAPI
+                .getBlocks(request.depth)
                 .map(_.getOrElse(List.empty[LightBlockInfo]))
             ) { r =>
               import BlockInfoResponse.Message
@@ -159,8 +156,8 @@ object DeployGrpcServiceV1 {
 
       def listenForDataAtName(request: DataAtNameQuery): Task[ListeningNameDataResponse] =
         defer(
-          BlockAPI
-            .getListeningNameDataResponse[F](request.depth, request.name.get, apiMaxBlocksLimit)
+          blockAPI
+            .getListeningNameDataResponse(request.depth, request.name.get)
         ) { r =>
           import ListeningNameDataResponse.Message
           import ListeningNameDataResponse.Message._
@@ -175,11 +172,10 @@ object DeployGrpcServiceV1 {
           request: ContinuationAtNameQuery
       ): Task[ContinuationAtNameResponse] =
         defer(
-          BlockAPI
-            .getListeningNameContinuationResponse[F](
+          blockAPI
+            .getListeningNameContinuationResponse(
               request.depth,
-              request.names,
-              apiMaxBlocksLimit
+              request.names
             )
         ) { r =>
           import ContinuationAtNameResponse.Message
@@ -192,7 +188,7 @@ object DeployGrpcServiceV1 {
         }
 
       def findDeploy(request: FindDeployQuery): Task[FindDeployResponse] =
-        defer(BlockAPI.findDeploy[F](request.deployId)) { r =>
+        defer(blockAPI.findDeploy(request.deployId)) { r =>
           import FindDeployResponse.Message
           import FindDeployResponse.Message._
           FindDeployResponse(r.fold[Message](Error, BlockInfo))
@@ -200,8 +196,8 @@ object DeployGrpcServiceV1 {
 
       def previewPrivateNames(request: PrivateNamePreviewQuery): Task[PrivateNamePreviewResponse] =
         defer(
-          BlockAPI
-            .previewPrivateNames[F](request.user, request.timestamp, request.nameQty)
+          blockAPI
+            .previewPrivateNames(request.user, request.timestamp, request.nameQty)
         ) { r =>
           import PrivateNamePreviewResponse.Message
           import PrivateNamePreviewResponse.Message._
@@ -214,21 +210,21 @@ object DeployGrpcServiceV1 {
         }
 
       def lastFinalizedBlock(request: LastFinalizedBlockQuery): Task[LastFinalizedBlockResponse] =
-        defer(BlockAPI.lastFinalizedBlock[F]) { r =>
+        defer(blockAPI.lastFinalizedBlock) { r =>
           import LastFinalizedBlockResponse.Message
           import LastFinalizedBlockResponse.Message._
           LastFinalizedBlockResponse(r.fold[Message](Error, BlockInfo))
         }
 
       def isFinalized(request: IsFinalizedQuery): Task[IsFinalizedResponse] =
-        defer(BlockAPI.isFinalized[F](request.hash)) { r =>
+        defer(blockAPI.isFinalized(request.hash)) { r =>
           import IsFinalizedResponse.Message
           import IsFinalizedResponse.Message._
           IsFinalizedResponse(r.fold[Message](Error, IsFinalized))
         }
 
       def bondStatus(request: BondStatusQuery): Task[BondStatusResponse] =
-        defer(BlockAPI.bondStatus[F](request.publicKey)) { r =>
+        defer(blockAPI.bondStatus(request.publicKey)) { r =>
           import BondStatusResponse.Message
           import BondStatusResponse.Message._
           BondStatusResponse(r.fold[Message](Error, IsBonded))
@@ -236,8 +232,8 @@ object DeployGrpcServiceV1 {
 
       def exploratoryDeploy(request: ExploratoryDeployQuery): Task[ExploratoryDeployResponse] =
         defer(
-          BlockAPI
-            .exploratoryDeploy[F](
+          blockAPI
+            .exploratoryDeploy(
               request.term,
               if (request.blockHash.isEmpty) none[String] else Some(request.blockHash),
               request.usePreStateHash
@@ -251,7 +247,7 @@ object DeployGrpcServiceV1 {
         }
 
       override def getEventByHash(request: BlockQuery): Task[EventInfoResponse] =
-        defer(BlockAPI.blockReport[F](request.hash)(reportingCasper)) { r =>
+        defer(blockAPI.blockReport(request.hash)) { r =>
           import EventInfoResponse.Message
           import EventInfoResponse.Message._
           EventInfoResponse(r.fold[Message](Error, Result))
@@ -261,11 +257,10 @@ object DeployGrpcServiceV1 {
         Observable
           .fromTask(
             deferList(
-              BlockAPI
-                .getBlocksByHeights[F](
+              blockAPI
+                .getBlocksByHeights(
                   request.startBlockNumber,
-                  request.endBlockNumber,
-                  apiMaxBlocksLimit
+                  request.endBlockNumber
                 )
                 .map(_.getOrElse(List.empty[LightBlockInfo]))
             ) { r =>

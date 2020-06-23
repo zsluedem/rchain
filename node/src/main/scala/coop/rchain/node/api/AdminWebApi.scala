@@ -23,13 +23,12 @@ trait AdminWebApi[F[_]] {
 object AdminWebApi {
 
   class AdminWebApiImpl[F[_]: Sync: Concurrent: EngineCell: Log: Span: SafetyOracle: BlockStore: Metrics: SynchronyConstraintChecker: LastFinalizedHeightConstraintChecker](
-      apiMaxBlocksLimit: Int,
-      blockApiLock: Semaphore[F]
+      blockAPI: BlockAPI[F]
   ) extends AdminWebApi[F] {
     import AdminWebApiSyntax._
 
     def propose: F[String] =
-      BlockAPI.createBlock[F](blockApiLock).flatMap(_.liftToBlockApiErr)
+      blockAPI.createBlock(false).flatMap(_.liftToBlockApiErr)
   }
 
   final class BlockApiException(message: String) extends Exception(message)

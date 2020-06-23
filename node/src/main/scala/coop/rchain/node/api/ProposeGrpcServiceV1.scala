@@ -25,8 +25,8 @@ import monix.eval.Task
 import monix.execution.Scheduler
 
 object ProposeGrpcServiceV1 {
-  def instance[F[_]: Concurrent: Log: SafetyOracle: BlockStore: Metrics: Taskable: Span: EngineCell: SynchronyConstraintChecker: LastFinalizedHeightConstraintChecker](
-      blockApiLock: Semaphore[F]
+  def instance[F[_]: Concurrent: Log: Metrics: Taskable: Span](
+      blockAPI: BlockAPI[F]
   )(
       implicit worker: Scheduler
   ): ProposeServiceV1GrpcMonix.ProposeService =
@@ -50,7 +50,7 @@ object ProposeGrpcServiceV1 {
           )
 
       def propose(request: PrintUnmatchedSendsQuery): Task[ProposeResponse] =
-        defer(BlockAPI.createBlock[F](blockApiLock, request.printUnmatchedSends)) { r =>
+        defer(blockAPI.createBlock(request.printUnmatchedSends)) { r =>
           import ProposeResponse.Message
           import ProposeResponse.Message._
           ProposeResponse(r.fold[Message](Error, Result))

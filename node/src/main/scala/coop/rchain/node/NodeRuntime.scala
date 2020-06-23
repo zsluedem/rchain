@@ -18,6 +18,8 @@ import coop.rchain.blockstorage.dag.{BlockDagFileStorage, BlockDagKeyValueStorag
 import coop.rchain.blockstorage.deploy.LMDBDeployStorage
 import coop.rchain.blockstorage.finality.LastFinalizedFileStorage
 import coop.rchain.blockstorage.util.io.IOError
+import coop.rchain.casper.api.BlockAPI
+import coop.rchain.casper.api.BlockAPI.BlockAPIImpl
 import coop.rchain.casper.{ReportingCasper, engine, _}
 import coop.rchain.casper.engine.{BlockRetriever, _}
 import coop.rchain.casper.engine.EngineCell._
@@ -879,24 +881,28 @@ object NodeRuntime {
         )
       }*/
       blockApiLock <- Semaphore[F](1)
+      blockApi = {
+        implicit val ec     = engineCell
+        implicit val sp     = span
+        implicit val or     = oracle
+        implicit val bs     = blockStore
+        implicit val sc     = synchronyConstraintChecker
+        implicit val lfhscc = lastFinalizedHeightConstraintChecker
+        new BlockAPIImpl[F](blockApiLock, conf.apiServer.maxBlocksLimit, reportingCasper)
+      }
       apiServers = NodeRuntime
         .acquireAPIServers[F](
           evalRuntime,
-          blockApiLock,
           scheduler,
-          conf.apiServer.maxBlocksLimit
+          blockApi
         )(
           blockStore,
           oracle,
           Concurrent[F],
           Metrics[F],
           span,
-          engineCell,
           Log[F],
-          Taskable[F],
-          synchronyConstraintChecker,
-          lastFinalizedHeightConstraintChecker,
-          reportingCasper
+          Taskable[F]
         )
       casperLoop = {
         implicit val br = blockRetriever
@@ -932,7 +938,7 @@ object NodeRuntime {
         implicit val sp = span
         implicit val or = oracle
         implicit val bs = blockStore
-        new WebApiImpl[F](conf.apiServer.maxBlocksLimit)
+        new WebApiImpl[F](blockApi)
       }
       adminWebApi = {
         implicit val ec     = engineCell
@@ -941,7 +947,7 @@ object NodeRuntime {
         implicit val bs     = blockStore
         implicit val sc     = synchronyConstraintChecker
         implicit val lfhscc = lastFinalizedHeightConstraintChecker
-        new AdminWebApiImpl[F](conf.apiServer.maxBlocksLimit, blockApiLock)
+        new AdminWebApiImpl[F](blockApi)
       }
     } yield (
       blockStore,
@@ -966,9 +972,8 @@ object NodeRuntime {
 
   def acquireAPIServers[F[_]](
       runtime: Runtime[F],
-      blockApiLock: Semaphore[F],
       scheduler: Scheduler,
-      apiMaxBlocksLimit: Int
+      blockAPI: BlockAPI[F]
   )(
       implicit
       blockStore: BlockStore[F],
@@ -976,17 +981,13 @@ object NodeRuntime {
       concurrent: Concurrent[F],
       metrics: Metrics[F],
       span: Span[F],
-      engineCell: EngineCell[F],
       logF: Log[F],
-      taskable: Taskable[F],
-      synchronyConstraintChecker: SynchronyConstraintChecker[F],
-      lastFinalizedHeightConstraintChecker: LastFinalizedHeightConstraintChecker[F],
-      reportingCasper: ReportingCasper[F]
+      taskable: Taskable[F]
   ): APIServers = {
     implicit val s: Scheduler = scheduler
     val repl                  = ReplGrpcService.instance(runtime, s)
-    val deploy                = DeployGrpcServiceV1.instance(blockApiLock, apiMaxBlocksLimit, reportingCasper)
-    val propose               = ProposeGrpcServiceV1.instance(blockApiLock)
+    val deploy                = DeployGrpcServiceV1.instance(blockAPI)
+    val propose               = ProposeGrpcServiceV1.instance(blockAPI)
     APIServers(repl, propose, deploy)
   }
 }

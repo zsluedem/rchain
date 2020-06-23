@@ -54,20 +54,19 @@ trait WebApi[F[_]] {
 object WebApi {
 
   class WebApiImpl[F[_]: Sync: Concurrent: EngineCell: Log: Span: SafetyOracle: BlockStore](
-      apiMaxBlocksLimit: Int
+      blockAPI: BlockAPI[F]
   ) extends WebApi[F] {
     import WebApiSyntax._
 
     def prepareDeploy(req: Option[PrepareRequest]): F[PrepareResponse] = {
-      val seqNumber = BlockAPI
-        .getLatestMessage[F]
+      val seqNumber = blockAPI.getLatestMessage
         .flatMap(_.liftToBlockApiErr)
         .map(_.seqNum)
         .handleError { case _: LatestBlockMessageError => -1 }
 
       val previewNames = req.fold(List[String]().pure) { r =>
-        BlockAPI
-          .previewPrivateNames[F](toByteString(r.deployer), r.timestamp, r.nameQty)
+        blockAPI
+          .previewPrivateNames(toByteString(r.deployer), r.timestamp, r.nameQty)
           .flatMap(_.liftToBlockApiErr)
           .map(_.map(toHex).toList)
       }
@@ -76,26 +75,26 @@ object WebApi {
     }
 
     def deploy(request: DeployRequest): F[String] =
-      toSignedDeploy(request).flatMap(BlockAPI.deploy(_)).flatMap(_.liftToBlockApiErr)
+      toSignedDeploy(request).flatMap(blockAPI.deploy(_)).flatMap(_.liftToBlockApiErr)
 
     def listenForDataAtName(req: DataRequest): F[DataResponse] =
-      BlockAPI
-        .getListeningNameDataResponse(req.depth, toPar(req), apiMaxBlocksLimit)
+      blockAPI
+        .getListeningNameDataResponse(req.depth, toPar(req))
         .flatMap(_.liftToBlockApiErr)
         .map(toDataResponse)
 
     def lastFinalizedBlock: F[BlockInfo] =
-      BlockAPI.lastFinalizedBlock[F].flatMap(_.liftToBlockApiErr)
+      blockAPI.lastFinalizedBlock.flatMap(_.liftToBlockApiErr)
 
     def getBlock(hash: String): F[BlockInfo] =
-      BlockAPI.getBlock[F](hash).flatMap(_.liftToBlockApiErr)
+      blockAPI.getBlock(hash).flatMap(_.liftToBlockApiErr)
 
     def getBlocks(depth: Int): F[List[LightBlockInfo]] =
-      BlockAPI.getBlocks[F](depth, apiMaxBlocksLimit).flatMap(_.liftToBlockApiErr)
+      blockAPI.getBlocks(depth).flatMap(_.liftToBlockApiErr)
 
     def findDeploy(deployId: String): F[LightBlockInfo] =
-      BlockAPI
-        .findDeploy[F](toByteString(deployId))
+      blockAPI
+        .findDeploy(toByteString(deployId))
         .flatMap(_.liftToBlockApiErr)
 
     def exploratoryDeploy(
@@ -103,7 +102,7 @@ object WebApi {
         blockHash: Option[String],
         usePreStateHash: Boolean
     ): F[ExploratoryDeployResponse] =
-      BlockAPI
+      blockAPI
         .exploratoryDeploy(term, blockHash, usePreStateHash)
         .flatMap(_.liftToBlockApiErr)
         .map(toExploratoryResponse)
@@ -115,12 +114,12 @@ object WebApi {
       ).pure
 
     def getBlocksByHeights(startBlockNumber: Long, endBlockNumber: Long): F[List[LightBlockInfo]] =
-      BlockAPI
-        .getBlocksByHeights(startBlockNumber, endBlockNumber, apiMaxBlocksLimit)
+      blockAPI
+        .getBlocksByHeights(startBlockNumber, endBlockNumber)
         .flatMap(_.liftToBlockApiErr)
 
     def isFinalized(hash: String): F[Boolean] =
-      BlockAPI.isFinalized(hash).flatMap(_.liftToBlockApiErr)
+      blockAPI.isFinalized(hash).flatMap(_.liftToBlockApiErr)
   }
 
   // Rholang terms interesting for translation to JSON
