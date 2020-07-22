@@ -602,29 +602,11 @@ object BlockAPI {
           implicit casper: MultiParentCasper[F]
       ): F[ApiErr[BlockInfo]] =
         for {
-          // Add constraint on the length of searched hash to prevent to many block results
-          // which can cause severe CPU load.
-          _ <- BlockRetrievalError(s"Input hash value must be at least 6 characters: $hash")
-                .raiseError[F, ApiErr[BlockInfo]]
-                .whenA(hash.length < 6)
-          // Check if hash string is in Base16 encoding and convert to ByteString
-          hashByteString <- Base16
-                             .decode(hash)
-                             .map(ByteString.copyFrom)
-                             .liftTo[F](
-                               BlockRetrievalError(
-                                 s"Input hash value is not valid hex string: $hash"
-                               )
-                             )
-          // Check if hash is complete and not just the prefix in which case
-          // we can use `get` directly and not iterate over the whole block hash index.
-          getBlock  = BlockStore[F].get(hashByteString)
-          findBlock = findBlockFromStore(hash)
+          getBlock  <- Sync[F].delay(BlockStore[F].getByString(hash))
+          findBlock = BlockStore[F].findBlockUnsafe(hash)
           blockF    = if (hash.length == 64) getBlock else findBlock
           // Get block form the block store
-          block <- blockF >>= (_.liftTo[F](
-                    BlockRetrievalError(s"Error: Failure to find block with hash: $hash")
-                  ))
+          block <- blockF
           // Check if the block is added to the dag and convert it to block info
           dag <- MultiParentCasper[F].blockDag
           blockInfo <- dag
@@ -720,18 +702,6 @@ object BlockAPI {
         faultTolerance = faultTolerance,
         justifications = block.justifications.map(ProtoUtil.justificationsToJustificationInfos)
       ).pure[F]
-
-    // Be careful to use this method , because it would iterate the whole indexes to find the matched one which would cause performance problem
-    // Trying to use BlockStore.get as much as possible would more be preferred
-    private def findBlockFromStore(
-        hash: String
-    ): F[Option[BlockMessage]] =
-      for {
-        findResult <- BlockStore[F].find(h => Base16.encode(h.toByteArray).startsWith(hash), 1)
-      } yield findResult.headOption match {
-        case Some((_, block)) => Some(block)
-        case None             => none[BlockMessage]
-      }
 
     private def addResponse(
         status: ValidBlockProcessing,
