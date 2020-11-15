@@ -497,7 +497,7 @@ lazy val rspace = (project in file("rspace"))
   )
   .dependsOn(shared % "compile->compile;test->test", crypto)
 
-lazy val rspaceBench = (project in file("rspace-bench"))
+lazy val bench = (project in file("bench"))
   .settings(
     commonSettings,
     libraryDependencies ++= commonDependencies,
@@ -529,6 +529,6 @@ lazy val rchain = (project in file("."))
     rholang,
     rholangCLI,
     rspace,
-    rspaceBench,
+    bench,
     shared
   )
