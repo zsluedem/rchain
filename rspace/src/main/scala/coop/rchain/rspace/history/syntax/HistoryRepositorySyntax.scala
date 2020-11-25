@@ -10,7 +10,9 @@ import coop.rchain.rspace.trace.Event.{
   containConflictingEvents,
   extractJoinedChannels,
   extractRSpaceEventGroup,
+  findNoOpChannelOnJoin,
   produceChannels,
+  produceInCommChannels,
   Conflict,
   IsConflict,
   NonConflict
@@ -143,26 +145,36 @@ final class HistoryRepositoryOps[F[_]: Sync, C, P, K, A](
   /**
     * detect conflict events between rightEvents and rightEvents.
     * In conflict case, conflict set contains the conflict channel hash.
+    *
+    * Some discussions are in https://github.com/rchain/rchain/issues/3139
     * @param baseState baseState needed here for detect conflict in joins
     * @return
     */
   def isConflict(
       baseState: Blake2b256Hash,
-      leftEvents: List[Event],
-      rightEvents: List[Event]
+      mainEvents: List[Event],
+      mergingEvents: List[Event]
   )(implicit sc: Serialize[C]): F[IsConflict] = {
-    val leftEventGroup  = extractRSpaceEventGroup(leftEvents)
-    val rightEventGroup = extractRSpaceEventGroup(rightEvents)
-    val conflictJoinInLeft =
-      extractJoinedChannels(leftEventGroup).intersect(produceChannels(rightEventGroup))
-    val conflictJoinInRight =
-      extractJoinedChannels(rightEventGroup).intersect(produceChannels(leftEventGroup))
-    val otherConflict          = containConflictingEvents(leftEventGroup, rightEventGroup)
-    val normalConflictChannels = conflictJoinInLeft ++ conflictJoinInRight ++ otherConflict
-    val nonconflictRightProduceChannels =
-      rightEventGroup.produces.filter(p => !normalConflictChannels.contains(p.channelsHash))
+    // eventGroup doesn't contain volatile events
+    val mainEventGroup    = extractRSpaceEventGroup(mainEvents)
+    val mergingEventGroup = extractRSpaceEventGroup(mergingEvents)
+
+    val conflictJoinInMain =
+      extractJoinedChannels(mainEventGroup).intersect(produceChannels(mergingEventGroup))
+    val conflictJoinInMerging =
+      extractJoinedChannels(mergingEventGroup).intersect(produceChannels(mainEventGroup))
+
+    val otherConflict          = containConflictingEvents(mainEventGroup, mergingEventGroup)
+    val normalConflictChannels = conflictJoinInMain ++ conflictJoinInMerging ++ otherConflict
+    // only look at merging side for better performance
+    // This should be check for case like below
+    //   @1!(0)      @0!(0)
+    //      \         /
+    //     for (_ <- @0;_ <- @1) { 0 }
+    val nonConflictMergingProduceChannels =
+      mergingEventGroup.produces.filter(p => !normalConflictChannels.contains(p.channelsHash))
     for {
-      rightJoins <- nonconflictRightProduceChannels.toList.traverse { produce =>
+      rightJoins <- nonConflictMergingProduceChannels.toList.traverse { produce =>
                      for {
                        joins <- historyRepo.getJoinsFromChannelHash(
                                  baseState,
@@ -171,7 +183,7 @@ final class HistoryRepositoryOps[F[_]: Sync, C, P, K, A](
                        joinM = joins.filter(_.length > 1)
                      } yield (produce, joinM)
                    }
-      leftProduceChannel = leftEventGroup.produces.map(_.channelsHash).toSet
+      leftProduceChannel = mainEventGroup.produces.map(_.channelsHash).toSet
       conflictJoinChannels = rightJoins
         .filter {
           case (produce, joins) => {
@@ -182,13 +194,44 @@ final class HistoryRepositoryOps[F[_]: Sync, C, P, K, A](
         }
         .map(_._1.channelsHash)
         .toSet
+
+      // The case below between "=" won't be concerned because we are not clear about
+      //  whether join should be lazy or greedy and we consider any produce on channels in joins are conflict.
+      // =================================================================
+//      // below are trying to solve conflict like
+//      //   @1!(0)      for (_ <- @0;_ <- @1) { 0 }
+//      //      \         /
+//      //        @0!(0)
+//      noOpChannelOnJoinsMain    = findNoOpChannelOnJoin(mainEventGroup, mergingEventGroup)
+//      noOpChannelOnJoinsMerging = findNoOpChannelOnJoin(mergingEventGroup, mainEventGroup)
+//      conflictJoins <- noOpChannelOnJoinsMain.toList.filterA { jc =>
+//                        jc.nonProducedChannel.toList.forallM { channelHash =>
+//                          for {
+//                            dataAtBase <- historyRepo.getDataFromChannelHash(baseState, channelHash)
+//                          } yield dataAtBase.nonEmpty
+//                        }
+//                      }
+//      conflictProduces <- noOpChannelOnJoinsMerging.toList.filterA { jc =>
+//                           jc.nonProducedChannel.toList.forallM { channelHash =>
+//                             for {
+//                               dataAtBase <- historyRepo.getDataFromChannelHash(
+//                                              baseState,
+//                                              channelHash
+//                                            )
+//                             } yield dataAtBase.nonEmpty
+//                           }
+//                         }
+//      conflictJoinsAtMerge = conflictProduces
+//        .flatMap(_.nonProducedChannel)
+//        .toSet ++ conflictJoins.flatMap(_.producedChannel).toSet
+      // =================================================================
     } yield
       if (normalConflictChannels.isEmpty && conflictJoinChannels.isEmpty) {
-        NonConflict(leftEventGroup, rightEventGroup)
+        NonConflict(mainEventGroup, mergingEventGroup)
       } else {
         Conflict(
-          leftEventGroup,
-          rightEventGroup,
+          mainEventGroup,
+          mergingEventGroup,
           normalConflictChannels ++ conflictJoinChannels
         )
       }

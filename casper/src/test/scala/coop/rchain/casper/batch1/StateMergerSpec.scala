@@ -27,7 +27,7 @@ class StateMergerSpec extends FlatSpec with Matchers with Inspectors with Mergea
     peekMergeabilityCases.map(t => evalTestCase(t._1, t._2)).map(_.runSyncUnsafe())
   }
 
-  it should "respect join mergeability rules" ignore {
+  it should "respect join mergeability rules" in {
     joinMergeabilityCases.map(t => evalTestCase(t._1, t._2)).map(_.runSyncUnsafe())
   }
 

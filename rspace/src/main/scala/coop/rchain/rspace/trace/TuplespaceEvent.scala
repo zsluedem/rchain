@@ -80,7 +80,9 @@ object TuplespaceEvent {
         if (bothPeeks) false
         else bothMatchedSameNonPersistentEvent.getOrElse(false)
 
-      } else ev.unsatisfied && other.unsatisfied
+      } else true
+    // different Polarity could match with each other which could be conflicts
+    // ev.unsatisfied && other.unsatisfied
 
     def unsatisfied: Boolean =
       ev.incoming.cardinality match {

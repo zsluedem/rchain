@@ -107,8 +107,45 @@ object Event {
     joinedChannels(b.consumes) ++ joinedChannels(b.comms.map(_.consume))
 
   }
+
+  def extractJoins(b: EventGroup): Set[Seq[Blake2b256Hash]] = {
+    def joinedChannels(consumes: Set[Consume]) =
+      consumes.withFilter(Consume.hasJoins).map(_.channelsHashes)
+
+    joinedChannels(b.consumes) ++ joinedChannels(b.comms.map(_.consume))
+  }
+
+  final case class JoinChannelAtProduce(
+      producedChannel: Seq[Blake2b256Hash],
+      nonProducedChannel: Seq[Blake2b256Hash],
+      joinChannelHashes: Seq[Blake2b256Hash]
+  )
+
+  /**
+    * Find the another channel which relates to a join in the left while there is a
+    * produce in right.
+    *
+    * Supposed case like below
+    * Left                                                  Right
+    * Join(Cosume(channel1), Consume(channel2))             Produce(channel1)
+    *
+    * Find channel2 in the case above.
+    */
+  def findNoOpChannelOnJoin(leftEventGroup: EventGroup, rightEventGroup: EventGroup) = {
+    val rightProduceChannels = rightEventGroup.produces.map(_.channelsHash).toSet
+    extractJoins(leftEventGroup)
+      .map(p => {
+        val (produceChannel, nonProduceChannel) = p.partition(rightProduceChannels.contains(_))
+        JoinChannelAtProduce(produceChannel, nonProduceChannel, p)
+      })
+      .filter(_.producedChannel.nonEmpty)
+  }
+
   def produceChannels(events: EventGroup) =
-    events.produces.map(_.channelsHash).toSet ++ events.comms.flatMap { comm =>
+    events.produces.map(_.channelsHash).toSet ++ produceInCommChannels(events)
+
+  def produceInCommChannels(events: EventGroup) =
+    events.comms.flatMap { comm =>
       comm.produces.map(_.channelsHash)
     }.toSet
 

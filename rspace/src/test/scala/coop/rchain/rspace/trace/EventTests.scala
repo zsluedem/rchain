@@ -1,6 +1,5 @@
 package coop.rchain.rspace.trace
 
-import cats.implicits._
 import coop.rchain.rspace.StableHashProvider._
 import coop.rchain.rspace.examples.StringExamples.implicits._
 import coop.rchain.rspace.examples.StringExamples.{Pattern, StringsCaptor}
@@ -9,14 +8,8 @@ import coop.rchain.rspace.test.ArbitraryInstances._
 import coop.rchain.rspace.Blake2b256Hash
 import org.scalatest.prop.GeneratorDrivenPropertyChecks
 import org.scalatest.{FlatSpec, Matchers}
-import scodec.bits.{BitVector, ByteVector}
 import scodec.codecs.{ignore => cignore, _}
-import scodec.interop.cats._
-import scodec.{Attempt, Codec}
-import coop.rchain.rspace.util
 import coop.rchain.shared.Serialize
-
-import scala.collection.immutable.Seq
 
 class EventTests extends FlatSpec with Matchers with GeneratorDrivenPropertyChecks {
 
