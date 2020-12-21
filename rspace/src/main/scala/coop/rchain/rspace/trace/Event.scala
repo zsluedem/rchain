@@ -6,12 +6,11 @@ import coop.rchain.rspace.internal._
 import cats.implicits._
 import coop.rchain.rspace.Blake2b256Hash
 import coop.rchain.rspace.internal.codecSeq
-import coop.rchain.rspace.trace.TuplespaceEvent.TuplespaceEventOps
+import coop.rchain.rspace.trace.PolarityEvent._
 import coop.rchain.shared.Serialize
 import scodec.Codec
 import scodec.bits.ByteVector
 import scodec.codecs._
-import shapeless.syntax.std.tuple.productTupleOps
 
 import scala.collection.SortedSet
 
@@ -155,28 +154,48 @@ object Event {
       .toSet ++ events.comms.flatMap { comm =>
       comm.consume.channelsHashes ++ comm.produces.map(_.channelsHash)
     }.toSet
+//
+//  def tuplespaceEventsPerChannel(
+//      b: EventGroup
+//  ): Map[Blake2b256Hash, Set[TuplespaceEvent]] = {
+//    val nonPersistentProducesInComms = b.comms.flatMap(_.produces).filterNot(_.persistent)
+//    val nonPersistentConsumesInComms = b.comms.map(_.consume).filterNot(_.persistent)
+//    val peekedProducesInCommsHashes =
+//      b.comms.withFilter(_.peeks.nonEmpty).flatMap(_.produces).map(_.hash)
+//
+//    val freeProduces = b.produces
+//      .diff(nonPersistentProducesInComms)
+//      .filterNot(p => peekedProducesInCommsHashes.contains(p.hash) && !p.persistent)
+//
+//    val freeConsumes = b.consumes.diff(nonPersistentConsumesInComms)
+//
+//    val produceEvents = freeProduces.map(TuplespaceEvent.from)
+//    val consumeEvents = freeConsumes.map(TuplespaceEvent.from)
+//    val commEvents    = b.comms.flatMap(TuplespaceEvent.from(_, b.consumes))
+//
+//    (produceEvents ++ consumeEvents ++ commEvents)
+//      .groupBy(_._1)
+//      .mapValues[Set[TuplespaceEvent]](_.map(_._2))
+//  }
 
-  def tuplespaceEventsPerChannel(
+  def polarityEventsPerChannel(
       b: EventGroup
-  ): Map[Blake2b256Hash, Set[TuplespaceEvent]] = {
-    val nonPersistentProducesInComms = b.comms.flatMap(_.produces).filterNot(_.persistent)
-    val nonPersistentConsumesInComms = b.comms.map(_.consume).filterNot(_.persistent)
+  ): Map[Blake2b256Hash, Set[PolarityEvent]] = {
+    val nonPersistentProducesInComms = b.comms.filterNot(_.consume.persistent).flatMap(_.produces).filterNot(_.persistent)
+    val nonPersistentConsumesInComms = b.comms.filterNot(c =>c.consume.persistent && c.produces.exists(_.persistent)).map(_.consume)
     val peekedProducesInCommsHashes =
       b.comms.withFilter(_.peeks.nonEmpty).flatMap(_.produces).map(_.hash)
-
     val freeProduces = b.produces
       .diff(nonPersistentProducesInComms)
       .filterNot(p => peekedProducesInCommsHashes.contains(p.hash) && !p.persistent)
-
     val freeConsumes = b.consumes.diff(nonPersistentConsumesInComms)
 
-    val produceEvents = freeProduces.map(TuplespaceEvent.from(_))
-    val consumeEvents = freeConsumes.flatMap(TuplespaceEvent.from(_))
-    val commEvents    = b.comms.flatMap(TuplespaceEvent.from(_, b.consumes))
-
+    val produceEvents = freeProduces.flatMap(PolarityEvent.toChannelPolarity)
+    val consumeEvents = freeConsumes.flatMap(PolarityEvent.toChannelPolarity(_, false))
+    val commEvents    = b.comms.flatMap(PolarityEvent.toChannelPolarity(_, b.consumes, b.produces))
     (produceEvents ++ consumeEvents ++ commEvents)
       .groupBy(_._1)
-      .mapValues[Set[TuplespaceEvent]](_.map(_._2))
+      .mapValues(_.map(_._2))
   }
 
   def containConflictingEvents(
@@ -184,18 +203,21 @@ object Event {
       b2Events: EventGroup
   ): Set[Blake2b256Hash] = {
     def channelConflicts(
-        b1Events: Set[TuplespaceEvent],
-        b2Events: Set[TuplespaceEvent]
+        b1Events: Set[PolarityEvent],
+        b2Events: Set[PolarityEvent]
     ): Boolean =
       (for {
         b1  <- b1Events
         b2  <- b2Events
-        res = b1.conflicts(b2)
+        res = b1.isConflict(b2)
+        _ = println(b1)
+        _ = println(b2)
+        _ = println(res)
         // TODO: fail fast
       } yield (res)).contains(true)
 
-    val b1Ops = tuplespaceEventsPerChannel(b1Events)
-    val b2Ops = tuplespaceEventsPerChannel(b2Events)
+    val b1Ops = polarityEventsPerChannel(b1Events)
+    val b2Ops = polarityEventsPerChannel(b2Events)
     val conflictPerChannel = b1Ops
       .map {
         case (channel, v) =>

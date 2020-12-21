@@ -243,9 +243,32 @@ trait MergeabilityRules {
     *
     *           MergedBlock
     *       /                         \
-    * B2 Rho("@0!(1)")      B3 Rho("for (_ <- @0;_ <- 1) { 0 }")
+    * B2 Rho("for (_ <<- @0) { 0 }")    B3 Rho("for (_ <<- @0) { 0 }")
     *       \                         /
     *             B1 Rho("@1!(0)")
+    *
+    * B3 events => Seq(produce(0 on 1), consume(), comm())
+    *
+    *
+    *           MergedBlock
+    *       /                         \
+    * B2 Rho("for (_ <<- @0) { 0 }")   B3 Rho("@1!(0)|for (_ <<- @0) { 0 }")
+    *       \                         /
+    *          B1 Rho("Nil")
+    *
+    * B3 events => Seq(produce(0 on 1), consume(), comm(), produce(0 on 1))
+    *
+    *
+    *           MergedBlock
+    *       /                         \
+    * B2 Rho("for (_ <<- @0) { 0 }")   B3 Rho("@1!(0)")
+    *       \                         /
+    *          B1 Rho("for (_ <<- @0) { 0 }")
+    *
+    * B3 events => Seq(produce(0 on 1), comm(), produce(0 on 1))
+    *
+    *
+    *
     *
     * (4!) C1
     *         MergedBlock
@@ -255,6 +278,9 @@ trait MergeabilityRules {
     *             B1  Rho("contract @0(0) = { 0 }")
     *
     */
+  val g = List(
+    "PX P!"    -> ConflictingCase(P0)(S1)(P_)(P0.rstate ++ P_.rstate)(S1.rstate),
+  )
   val baseMergeabilityCases = List(
     "!X !X"    -> MergeableCase(S0)(S0)(Nil)(S0.rstate ++ S0.rstate),
     "!X !4"    -> ConflictingCase(S0)(F_)(S1)(S0.rstate ++ S1.rstate)(emptyState),

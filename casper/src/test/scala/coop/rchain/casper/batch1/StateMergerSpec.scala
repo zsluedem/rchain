@@ -30,6 +30,9 @@ class StateMergerSpec extends FlatSpec with Matchers with Inspectors with Mergea
   it should "respect join mergeability rules" in {
     joinMergeabilityCases.map(t => evalTestCase(t._1, t._2)).map(_.runSyncUnsafe())
   }
+  it should "a join mergeability rules" in {
+    g.map(t => evalTestCase(t._1, t._2)).map(_.runSyncUnsafe())
+  }
 
   def evalTestCase(testName: String, testCase: MergeabilityTestCase) =
     for {
