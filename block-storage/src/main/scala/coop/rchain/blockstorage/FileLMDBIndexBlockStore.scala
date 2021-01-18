@@ -29,6 +29,7 @@ import coop.rchain.shared.{AtomicMonadState, Log}
 import monix.execution.atomic.AtomicAny
 import org.lmdbjava.DbiFlags.MDB_CREATE
 import org.lmdbjava.ByteBufferProxy.PROXY_SAFE
+import fs2._
 import org.lmdbjava._
 
 import scala.util.matching.Regex
@@ -137,6 +138,26 @@ class FileLMDBIndexBlockStore[F[_]: Monad: Sync: RaiseIOError: Log] private (
                    readBlockMessage(indexEntry)
                      .map(block => List(blockHash -> BlockMessage.from(block).right.get)) // TODO FIX-ME
                })
+    } yield result
+
+  override def iterateStream: F[Stream[F, BlockMessage]] =
+    for {
+      indexes <- index.iterate { iterator =>
+                  Stream.chunk(
+                    Chunk.iterable(
+                      iterator
+                        .map(kv => (ByteString.copyFrom(kv.key()), kv.`val`()))
+                        .map {
+                          case (key, value) => (key, IndexEntry.load(value))
+                        }
+                        .toIterable
+                    )
+                  )
+                }
+      result = indexes.evalMap {
+        case (_, indexEntry) =>
+          readBlockMessage(indexEntry).map(b => BlockMessage.from(b).right.get)
+      }
     } yield result
 
   // Default implementation will use `get` to load the whole block so

@@ -2,6 +2,7 @@ package coop.rchain.blockstorage
 
 import cats.Applicative
 import cats.syntax.all._
+import fs2._
 import coop.rchain.casper.protocol.{ApprovedBlock, BlockMessage}
 import coop.rchain.models.BlockHash.BlockHash
 
@@ -30,6 +31,8 @@ trait BlockStore[F[_]] {
   def clear(): F[Unit]
 
   def close(): F[Unit]
+
+  def iterateStream(): F[Stream[F, BlockMessage]]
 
   // Defaults
 

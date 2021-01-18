@@ -59,6 +59,8 @@ class InMemBlockStore[F[_]] private ()(
     } yield ()
 
   override def close(): F[Unit] = monadF.pure(())
+
+  override def iterateStream(): F[fs2.Stream[F, BlockMessage]] = ???
 }
 
 object InMemBlockStore {

@@ -10,7 +10,7 @@ import coop.rchain.casper.protocol._
 import coop.rchain.models.BlockHash.BlockHash
 import coop.rchain.shared.ByteStringOps.RichByteString
 import coop.rchain.shared.ByteVectorOps.RichByteVector
-import coop.rchain.shared.Compression
+import coop.rchain.shared.{Compression, Log}
 import coop.rchain.shared.syntax._
 import coop.rchain.store.{KeyValueStore, KeyValueStoreManager}
 import net.jpountz.lz4.{LZ4CompressorWithLength, LZ4DecompressorWithLength}
@@ -97,6 +97,8 @@ class KeyValueBlockStore[F[_]: Sync](
   // Resource management is done in KV manager
   override def close(): F[Unit] = ().pure[F]
 
+  override def iterateStream(): F[fs2.Stream[F, BlockMessage]] = ???
+
   // Not used
   override def checkpoint(): F[Unit] = ???
   override def clear(): F[Unit]      = ???
@@ -157,5 +159,19 @@ object KeyValueBlockStore {
     Sync[F].delay(decompressor.decompress(bytes)).handleErrorWith { ex =>
       new Exception("Decompress of block failed.", ex).raiseError
     }
+
+  def importFromFileStorage[F[_]: Sync: Log](
+      fileLMDBBlockStore: BlockStore[F],
+      keyValueBlockStore: KeyValueBlockStore[F]
+  ) =
+    for {
+      dataStream    <- fileLMDBBlockStore.iterateStream()
+      operation     = dataStream.evalMap(blockMessage => keyValueBlockStore.put(blockMessage))
+      _             <- Log[F].info("Migrating file based block store to key value store.")
+      _             <- operation.compile.toList
+      approvedBlock <- fileLMDBBlockStore.getApprovedBlock.map(_.get)
+      _             <- keyValueBlockStore.putApprovedBlock(approvedBlock)
+      _             <- Log[F].info("Migration on blockStore is done.")
+    } yield ()
 
 }
