@@ -1,5 +1,7 @@
 package coop.rchain.store
 
+import fs2.Stream
+
 trait KeyValueTypedStore[F[_], K, V] {
   def get(keys: Seq[K]): F[Seq[Option[V]]]
 
@@ -10,4 +12,7 @@ trait KeyValueTypedStore[F[_], K, V] {
   def contains(keys: Seq[K]): F[Seq[Boolean]]
 
   def toMap: F[Map[K, V]]
+
+  def iterateStream(): F[Stream[F, (K, V)]]
+
 }

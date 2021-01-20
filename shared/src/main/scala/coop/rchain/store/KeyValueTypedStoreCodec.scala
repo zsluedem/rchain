@@ -5,6 +5,7 @@ import cats.syntax.all._
 import coop.rchain.shared.ByteVectorOps.RichByteVector
 import scodec.Codec
 import scodec.bits.BitVector
+import fs2._
 
 class KeyValueTypedStoreCodec[F[_]: Sync, K, V](
     store: KeyValueStore[F],
@@ -92,4 +93,22 @@ class KeyValueTypedStoreCodec[F[_]: Sync, K, V](
 
                }
     } yield values.toMap
+
+  override def iterateStream: F[Stream[F, (K, V)]] =
+    for {
+      indexes <- store.iterate { iterator =>
+                  Stream.chunk(
+                    Chunk.iterable(
+                      iterator.map { case (k, v) => (BitVector(k), BitVector(v)) }.toIterable
+                    )
+                  )
+                }
+      result = indexes.evalMap {
+        case (k, v) =>
+          for {
+            key   <- decodeKey(k)
+            value <- decodeValue(v)
+          } yield (key, value)
+      }
+    } yield result
 }
