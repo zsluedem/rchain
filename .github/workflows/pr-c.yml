@@ -1,10 +1,7 @@
 name: Pull Request2
 on:
-  pull_request:
-    types: [opened]
   issue_comment:
     types: [created]
-
 jobs:
   hello:
     runs-on: ubuntu-latest
