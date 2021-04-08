@@ -154,6 +154,37 @@ jobs:
           export SBT_OPTS="$SBT_OPTS"
           ./.github/run-unit-test-selection
 
+  # Run benchmark
+  run_benchmark:
+    name: Unit Tests
+    needs: build_base
+    runs-on: ubuntu-latest
+    container: rchain/buildenv
+    steps:
+      - name: Clone Repository
+        uses: actions/checkout@v1
+
+      - name: Load Working Tree
+        uses: actions/download-artifact@v1
+        with:
+          name: rchain-worktree
+
+      - name: Restore Working Tree
+        run: tar -H posix -xzf rchain-worktree/rchain-worktree.tar.gz
+
+      - name: Initialize Environment
+        run: ./.github/init-environment
+
+      - name: Restore Cache
+        uses: actions/cache@v1
+        with:
+          path: ${{ env.CACHE_ROOT }}
+          key: ${{ env.CACHE_KEY_PREFIX_SCALA }}${{ env.CACHE_KEY_HASH_SCALA }}
+          restore-keys: ${{ env.CACHE_KEY_PREFIX_SCALA }}
+      - name: Run benchmark
+        run: |
+          export SBT_OPTS="$SBT_OPTS"
+          ./.github/run-unit-test-selection
 
   # Get compiled RChain, build Docker image, and save it for next jobs.
   build_docker_image:
