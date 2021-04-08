@@ -1,8 +1,5 @@
-
 name: Pull Request Comment Trigger Example
-on:
-  issue_comment:
-    types: [created]
+on: [issue_comment, pull_request]
 
 jobs:
   hello:
