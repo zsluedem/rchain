@@ -12,7 +12,6 @@ jobs:
       - name: Slash Command Dispatch (JSON)
         id: scd
         uses: peter-evans/slash-command-dispatch@v2
-
         with:
           token: ${{ secrets.PAT }}
           config: >
