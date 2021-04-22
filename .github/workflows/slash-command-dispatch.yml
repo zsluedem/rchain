@@ -12,13 +12,12 @@ jobs:
       - name: Slash Command Dispatch (JSON)
         id: scd
         uses: peter-evans/slash-command-dispatch@v2
-
         with:
           token: ${{ secrets.PAT }}
           config: >
             [
               {
-                "command": "hello-world-pr",
+                "command": "hello-world-pr-command",
                 "permission": "none",
                 "repository": "zsluedem/rchain-bench-test",
                 "issue_type": "pull-request"
