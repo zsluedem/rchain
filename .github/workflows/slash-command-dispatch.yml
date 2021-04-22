@@ -17,10 +17,9 @@ jobs:
           config: >
             [
               {
-                "command": "hello-world",
+                "command": "hello-world-pr-command",
                 "permission": "none",
                 "repository": "zsluedem/rchain-bench-test",
-                "issue_type": "pull-request",
-                "event_type_suffix": "-pr-command"
+                "issue_type": "pull-request"
               }
             ]
