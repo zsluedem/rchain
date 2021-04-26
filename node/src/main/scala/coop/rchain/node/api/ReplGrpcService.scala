@@ -12,19 +12,25 @@ import coop.rchain.rholang.interpreter.compiler.ParBuilder
 import coop.rchain.rholang.interpreter.errors.InterpreterError
 import coop.rchain.rholang.interpreter.storage.StoragePrinter
 import coop.rchain.rholang.interpreter.{RhoRuntime, _}
+import coop.rchain.shared.{Log, Stopwatch}
 import coop.rchain.shared.syntax._
 import monix.eval.Task
 import monix.execution.Scheduler
 
 object ReplGrpcService {
 
-  def apply[F[_]: Monixable: Sync](runtime: RhoRuntime[F], worker: Scheduler): ReplGrpcMonix.Repl =
+  def apply[F[_]: Monixable: Sync: Log](
+      runtime: RhoRuntime[F],
+      worker: Scheduler
+  ): ReplGrpcMonix.Repl =
     new ReplGrpcMonix.Repl {
       def exec(source: String, printUnmatchedSendsOnly: Boolean = false): F[ReplResponse] =
         Sync[F]
           .attempt(
-            ParBuilder[F]
-              .buildNormalizedTerm(source, Map.empty[String, Par])
+            Stopwatch.time(Log[F].info(_))("Normalization takes:")(
+              ParBuilder[F]
+                .buildNormalizedTerm(source, Map.empty[String, Par])
+            )
           )
           .flatMap {
             case Left(er) =>
@@ -37,7 +43,9 @@ object ReplGrpcService {
                 _ <- Sync[F].delay(printNormalizedTerm(term))
                 res <- {
                   implicit val rand = Blake2b512Random(10)
-                  runtime.evaluate(source, Cost.UNSAFE_MAX, Map.empty[String, Par])
+                  Stopwatch.time(Log[F].info(_))("Evaluation takes:")(
+                    runtime.evaluate(source, Cost.UNSAFE_MAX, Map.empty[String, Par])
+                  )
                 }
                 prettyStorage <- if (printUnmatchedSendsOnly)
                                   StoragePrinter.prettyPrintUnmatchedSends(runtime)
