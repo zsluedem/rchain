@@ -45,7 +45,7 @@ import coop.rchain.rspace.state.instances.RSpaceStateManagerImpl
 import coop.rchain.rspace.syntax._
 import coop.rchain.rspace.{Context, Match, RSpace}
 import coop.rchain.shared._
-import coop.rchain.store.LmdbDirStoreManager
+import coop.rchain.store.{InMemoryStoreManager, LmdbDirStoreManager}
 import fs2.concurrent.Queue
 import monix.execution.Scheduler
 
@@ -158,11 +158,13 @@ object Setup {
         implicit val lf = lastFinalizedStorage
         LastFinalizedHeightConstraintChecker[F]
       }
+
+      evalStoreManager = InMemoryStoreManager[F]()
       // runtime for `rnode eval`
       evalRuntime <- {
         implicit val sp = span
         for {
-          store    <- rnodeStoreManager.evalStores
+          store    <- evalStoreManager.evalStores
           runtimes <- RhoRuntime.createRuntimes[F](store)
         } yield runtimes._1
       }
