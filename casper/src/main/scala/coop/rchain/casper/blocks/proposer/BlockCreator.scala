@@ -107,6 +107,7 @@ object BlockCreator {
         dummyDeploys    = prepareDummyDeploy(nextBlockNum)
         slashingDeploys <- prepareSlashingDeploys(nextSeqNum)
         // make sure closeBlock is the last system Deploy
+        _ <- Log[F].info(s"${Base16.encode(selfId.toByteArray)} ${nextSeqNum}")
         systemDeploys = slashingDeploys :+ CloseBlockDeploy(
           SystemDeployUtil
             .generateCloseDeployRandomSeed(selfId, nextSeqNum)

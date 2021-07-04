@@ -346,6 +346,7 @@ final class RhoRuntimeOps[F[_]: Sync: Span: Log](
                              Span[F].traceI("consume-system-result") {
                                consumeSystemResult(systemDeploy)
                              }
+      _ <- Log[F].error(s"${maybeConsumedTuple}")
       resultOrSystemDeployError <- maybeConsumedTuple match {
                                     case Some((_, Seq(ListParWithRandom(Seq(par), _)))) =>
                                       systemDeploy.extractResult(par) match {
@@ -444,6 +445,7 @@ final class RhoRuntimeOps[F[_]: Sync: Span: Log](
       for {
         _ <- runtime.setBlockData(blockData)
         _ <- runtime.setInvalidBlocks(invalidBlocks)
+        _ <- Log[F].info(s"${blockData}")
         deployProcessResult <- Span[F].withMarks("process-deploys") {
                                 processDeploys(
                                   startHash,
@@ -452,11 +454,12 @@ final class RhoRuntimeOps[F[_]: Sync: Span: Log](
                                 )
                               }
         (startHash, processedDeploys) = deployProcessResult
+        _                             <- Log[F].info(s"play deploys done. ${Base16.encode(startHash.toByteArray)}")
         systemDeployProcessResult <- {
           import cats.instances.list._
           systemDeploys.toList.foldM((startHash, Vector.empty[ProcessedSystemDeploy])) {
             case ((startHash, processedSystemDeploys), sd) =>
-              playSystemDeploy(startHash)(sd) >>= {
+              Log[F].info(s"play system ${sd}") >> playSystemDeploy(startHash)(sd) >>= {
                 case PlaySucceeded(stateHash, processedSystemDeploy, _) =>
                   (stateHash, processedSystemDeploys :+ processedSystemDeploy).pure[F]
                 case PlayFailed(Failed(_, errorMsg)) =>
