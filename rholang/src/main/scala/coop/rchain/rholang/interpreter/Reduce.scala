@@ -152,6 +152,8 @@ class DebruijnInterpreter[M[_]: Sync: Parallel: _cost](
       implicit env: Env[Par],
       rand: Blake2b512Random
   ): M[Unit] = {
+    import coop.rchain.models.Pretty
+    println(Pretty.pretty(par))
     val terms: Seq[GeneratedMessage] = Seq(
       par.sends,
       par.receives,

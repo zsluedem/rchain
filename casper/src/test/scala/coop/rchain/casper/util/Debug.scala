@@ -54,21 +54,21 @@ class Debug extends FlatSpec with Matchers {
           )
       _    <- runtime.reset(Blake2b256Hash.fromByteString(state))
       _    <- runtime.evaluateSystemSource(closeBlock)
-      soft <- runtime.createSoftCheckpoint
-
-      _ <- reportingRuntime.rig(soft.log)
-      _ <- reportingRuntime.setBlockData(
-            BlockData(1625455092656L, 1110000L, PublicKey(selfId), 267260)
-          )
-      _              <- reportingRuntime.reset(Blake2b256Hash.fromByteString(state))
-      evaluateResult <- reportingRuntime.evaluateSystemSource(closeBlock)
-      report         <- reportingRuntime.getReport
-      _              = println(report.drop(10))
-      maybeConsumedTuple <- if (evaluateResult.failed)
-                             Task.raiseError(UnexpectedSystemErrors(evaluateResult.errors))
-                           else
-                             reportingRuntime.consumeSystemResult(closeBlock)
-      _ = println(s"${maybeConsumedTuple}")
+//      soft <- runtime.createSoftCheckpoint
+//
+//      _ <- reportingRuntime.rig(soft.log)
+//      _ <- reportingRuntime.setBlockData(
+//            BlockData(1625455092656L, 1110000L, PublicKey(selfId), 267260)
+//          )
+//      _              <- reportingRuntime.reset(Blake2b256Hash.fromByteString(state))
+//      evaluateResult <- reportingRuntime.evaluateSystemSource(closeBlock)
+//      report         <- reportingRuntime.getReport
+//      _              = println(report.drop(10))
+//      maybeConsumedTuple <- if (evaluateResult.failed)
+//                             Task.raiseError(UnexpectedSystemErrors(evaluateResult.errors))
+//                           else
+//                             reportingRuntime.consumeSystemResult(closeBlock)
+//      _ = println(s"${maybeConsumedTuple}")
 
     } yield ()
 
