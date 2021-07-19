@@ -530,15 +530,7 @@ object BlockAPI {
                   BlockRetrievalError(s"Error: Failure to find block with hash: $hash")
                 ))
         // Check if the block is added to the dag and convert it to block info
-        dag <- MultiParentCasper[F].blockDag
-        blockInfo <- dag
-                      .contains(block.blockHash)
-                      .ifM(
-                        getFullBlockInfo[F](block),
-                        BlockRetrievalError(
-                          s"Error: Block with hash $hash received but not added yet"
-                        ).raiseError[F, BlockInfo]
-                      )
+        blockInfo <- getFullBlockInfo[F](block)
       } yield blockInfo.asRight
 
     EngineCell[F].read >>= (
