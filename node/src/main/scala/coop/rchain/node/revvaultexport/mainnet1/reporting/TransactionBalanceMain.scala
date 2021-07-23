@@ -77,7 +77,7 @@ object TransactionBalanceMain {
     }
 
     val transactionBalancesFile = outputDir.resolve("transactionBalances.csv")
-    val transferHistory         = outputDir.resolve("transfer")
+    val transferHistory         = outputDir.resolve("transferHistory.csv")
 
     implicit val tc = Concurrent[Task]
 
@@ -91,16 +91,15 @@ object TransactionBalanceMain {
                )
       (transactionBalances, transfer) = result
       _ = {
-        transfer.toList.foreach {
-          case (addr, transfers) => {
-            val historyFile = transferHistory.resolve(s"${addr}.csv")
-            val bw          = new PrintWriter(historyFile.toFile)
-            transfers.toList.foreach(
-              t => bw.write(s"${t.toAddr},${t.fromAddr},${t.amount},${t.blockNumber}\n")
+        val historyFile = transferHistory.toFile
+        val bw          = new PrintWriter(historyFile)
+        transfer.foreach {
+          case t =>
+            bw.write(
+              s"${t.toAddr},${t.fromAddr},${t.amount},${t.blockNumber},${t.blockHash},${t.deployId},${t.timestamp},${t.isSucceeded},${t.isFinalized},${t.transactionType},${t.reason}\n"
             )
-            bw.close()
-          }
         }
+        bw.close()
       }
       _ = {
         val file = transactionBalancesFile.toFile

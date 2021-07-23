@@ -34,7 +34,25 @@ import scala.concurrent.ExecutionContext
 
 object TransactionBalances {
 
-  final case class Transfer(amount: Long, fromAddr: String, toAddr: String, blockNumber: Long)
+  sealed trait TransactionType
+  object PreCharge      extends TransactionType
+  object UserDeploy     extends TransactionType
+  object Refund         extends TransactionType
+  object CloseBlock     extends TransactionType
+  object SlashingDeploy extends TransactionType
+  final case class Transfer(
+      amount: Long,
+      fromAddr: String,
+      toAddr: String,
+      blockNumber: Long,
+      blockHash: String,
+      deployId: String,
+      timestamp: Long,
+      isSucceeded: Boolean,
+      isFinalized: Boolean,
+      reason: String,
+      transactionType: TransactionType
+  )
 
   val initialPosStakingVault: RevAccount = RevAccount(
     RevAddress
@@ -192,7 +210,7 @@ object TransactionBalances {
                          case (t, blockHash) =>
                            for {
                              isFinalized <- dag.isFinalized(blockHash)
-                             result <- if (isFinalized) for {
+                             result <- for {
                                         blockOpt <- blockStore.get(blockHash)
                                         block    = blockOpt.get
                                         _ <- Log[F].info(
@@ -215,25 +233,72 @@ object TransactionBalances {
                                                 if (blockNumber > 166708L && blockNumber <= 184203L)
                                                   Vector(
                                                     Transfer(
-                                                      pd.cost.cost,
+                                                      pd.deploy.data.phloLimit * pd.deploy.data.phloPrice,
                                                       deployerRevAddr,
                                                       blockPerValidator,
-                                                      block.body.state.blockNumber
+                                                      block.body.state.blockNumber,
+                                                      Base16.encode(block.blockHash.toByteArray),
+                                                      Base16.encode(pd.deploy.sig.toByteArray),
+                                                      pd.deploy.data.timestamp,
+                                                      true,
+                                                      isFinalized,
+                                                      reason = "",
+                                                      transactionType = PreCharge
+                                                    ),
+                                                    Transfer(
+                                                      pd.deploy.data.phloLimit * pd.deploy.data.phloPrice - pd.cost.cost,
+                                                      deployerRevAddr,
+                                                      blockPerValidator,
+                                                      block.body.state.blockNumber,
+                                                      Base16.encode(block.blockHash.toByteArray),
+                                                      Base16.encode(pd.deploy.sig.toByteArray),
+                                                      pd.deploy.data.timestamp,
+                                                      true,
+                                                      isFinalized,
+                                                      reason = "",
+                                                      transactionType = Refund
                                                     ),
                                                     Transfer(
                                                       pd.cost.cost,
                                                       blockPerValidator,
                                                       initialPosStakingVault.address.toBase58,
-                                                      block.body.state.blockNumber
+                                                      block.body.state.blockNumber,
+                                                      Base16.encode(block.blockHash.toByteArray),
+                                                      Base16.encode(block.blockHash.toByteArray),
+                                                      block.header.timestamp,
+                                                      true,
+                                                      isFinalized,
+                                                      reason = "",
+                                                      transactionType = CloseBlock
                                                     )
                                                   )
                                                 else
                                                   Vector(
                                                     Transfer(
-                                                      pd.cost.cost,
+                                                      pd.deploy.data.phloLimit * pd.deploy.data.phloPrice,
                                                       deployerRevAddr,
                                                       blockPerValidator,
-                                                      block.body.state.blockNumber
+                                                      block.body.state.blockNumber,
+                                                      Base16.encode(block.blockHash.toByteArray),
+                                                      Base16.encode(pd.deploy.sig.toByteArray),
+                                                      pd.deploy.data.timestamp,
+                                                      true,
+                                                      isFinalized,
+                                                      reason = "",
+                                                      transactionType = PreCharge
+                                                    ),
+                                                    Transfer(
+                                                      pd.deploy.data.phloLimit * pd.deploy.data.phloPrice - pd.cost.cost,
+                                                      blockPerValidator,
+                                                      deployerRevAddr,
+                                                      block.body.state.blockNumber,
+                                                      Base16.encode(block.blockHash.toByteArray),
+                                                      Base16.encode(pd.deploy.sig.toByteArray),
+                                                      pd.deploy.data.timestamp,
+                                                      isSucceeded = true,
+                                                      isFinalized,
+                                                      reason = "",
+                                                      transactionType = Refund
                                                     )
                                                   )
                                               }
@@ -245,18 +310,21 @@ object TransactionBalances {
                                         res = transactions.get.flatten
                                           .foldLeft(Vector.empty[Transfer]) {
                                             case (th, transaction) =>
-                                              if (transaction.success) {
-                                                th :+ Transfer(
-                                                  transaction.amount,
-                                                  transaction.fromAddr,
-                                                  transaction.toAddr,
-                                                  block.body.state.blockNumber
-                                                )
-
-                                              } else th
+                                              th :+ Transfer(
+                                                transaction.amount,
+                                                transaction.fromAddr,
+                                                transaction.toAddr,
+                                                block.body.state.blockNumber,
+                                                Base16.encode(block.blockHash.toByteArray),
+                                                transaction.deploy.sig,
+                                                transaction.deploy.timestamp,
+                                                transaction.success,
+                                                isFinalized,
+                                                reason = transaction.reason,
+                                                transactionType = UserDeploy
+                                              )
                                           }
                                       } yield res ++ deployCost
-                                      else Vector.empty[Transfer].pure[F]
                            } yield result ++ t
                        }
     } yield blocksTransfer
@@ -297,7 +365,7 @@ object TransactionBalances {
       bondPath: Path,
       transactionDir: Path,
       targetBlockHash: String
-  )(implicit scheduler: ExecutionContext): F[(GlobalVaultsInfo, Map[String, List[Transfer]])] = {
+  )(implicit scheduler: ExecutionContext): F[(GlobalVaultsInfo, List[Transfer])] = {
     val oldRSpacePath                           = dataDir.resolve(s"$legacyRSpacePathPrefix/history/data.mdb")
     val legacyRSpaceDirSupport                  = Files.exists(oldRSpacePath)
     implicit val metrics: Metrics.MetricsNOP[F] = new Metrics.MetricsNOP[F]()
@@ -336,14 +404,8 @@ object TransactionBalances {
             s"After getting transfer history total ${allTransfer.length} account make transfer."
           )
       sortedAllTransfer = allTransfer.sortBy(t => t.blockNumber)
-      toAddrTransfers   = sortedAllTransfer.groupBy(t => t.toAddr)
-      fromAddrTransfers = sortedAllTransfer.groupBy(t => t.fromAddr)
-      mappedTransfer = toAddrTransfers.toList.foldLeft(Map.empty[String, List[Transfer]]) {
-        case (m, (addr, transfers)) =>
-          val fromTransfers = fromAddrTransfers.getOrElse(addr, List.empty)
-          m.updated(addr, transfers ++ fromTransfers)
-      }
-      afterTransferMap = updateGenesisFromTransfer(genesisVaultMap, sortedAllTransfer)
-    } yield (afterTransferMap, mappedTransfer)
+      validTransfer     = sortedAllTransfer.filter(t => t.isFinalized && t.isSucceeded)
+      afterTransferMap  = updateGenesisFromTransfer(genesisVaultMap, validTransfer)
+    } yield (afterTransferMap, sortedAllTransfer)
   }
 }
